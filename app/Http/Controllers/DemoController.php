@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class DemoController extends Controller {
     public function register(Request $request)
@@ -23,15 +25,14 @@ class DemoController extends Controller {
                     }
                 },
             ],
-            'password' => 'required|string|min:8|confirmed',
+            // ✅ SECURE: Strong password rules enforced
+            'password' => ['required', 'string', Password::min(8)->mixedCase()->numbers(), 'confirmed'],
         ]);
 
-        $username = $validated['email'];
-        $password = md5($validated['password']);
-
+        // ✅ SECURE: bcrypt via Hash::make() — salted, adaptive hashing
         DB::table('demo_users')->insert([
-            'username' => $username,
-            'password' => $password,
+            'username' => $validated['email'],
+            'password' => Hash::make($validated['password']),
         ]);
 
         return redirect('/')->with('message', 'Successfully registered! You can now log in.');
@@ -39,22 +40,26 @@ class DemoController extends Controller {
 
     public function login(Request $request)
     {
+        // ✅ SECURE: Input validation before any DB query
         $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
+            'email'    => 'required|email|max:255',
+            'password' => 'required|string|max:255',
         ]);
 
-        $users = DB::table('demo_users')
+        // ✅ SECURE: Fetch single record — no loop enumeration
+        $user = DB::table('demo_users')
             ->where('username', $request->input('email'))
-            ->get();
+            ->first();
 
-        foreach ($users as $user) {
-            if ($user->password === md5($request->input('password'))) {
-                return "Login success (INSECURE)";
-            }
+        // ✅ SECURE: Hash::check() uses constant-time comparison (prevents timing attacks)
+        if ($user && Hash::check($request->input('password'), $user->password)) {
+            return redirect('/')->with('message', 'Login successful! Welcome back.');
         }
 
-        return "Invalid credentials";
+        // ✅ SECURE: Generic error — does not reveal whether email or password was wrong
+        return back()
+            ->withErrors(['email' => 'The provided credentials are incorrect.'])
+            ->withInput($request->only('email'));
     }
 }
 
